@@ -1,0 +1,7 @@
+results/*
+!results/reference/
+__pycache__/
+.venv/
+*.pyc
+.work*/
+external/*/raw/
