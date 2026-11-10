@@ -15,7 +15,8 @@ as --json-schema and returns the structured output, serialised, as the message c
 to the system prompt (JSON_MODE: answer with one JSON object only) and returns the JSON object found in the reply; a
 bare {"type": "object"} schema is not used because the CLI then tends to encode nested values as JSON strings. `tools` (or legacy `functions`) are mapped to one
 JSON schema whose `call` is one of the offered functions' argument objects (or, when the model may decline, a plain
-reply); a chosen function comes back as a tool_calls message.
+reply); a chosen function comes back as a tool_calls message. `stream: true` gets the finished completion as
+server-sent events: one chunk with the whole message, a usage chunk if stream_options.include_usage, then [DONE].
 
 Embedding requests: input is a string or a list of strings; the response is float lists or, when the client asks for
 encoding_format=base64 (the OpenAI Python client does by default), little-endian float32 bytes in base64. The model
@@ -161,6 +162,19 @@ def _approx_tokens(s):
     return max(1, len(s) // 4)
 
 
+def stream_chunk(out, empty=False):
+    """One chat.completion.chunk carrying a whole completion's message (or nothing, for the usage chunk)."""
+    choices = []
+    if not empty:
+        c = out["choices"][0]
+        delta = {"role": "assistant", "content": c["message"].get("content")}
+        if c["message"].get("tool_calls"):
+            delta["tool_calls"] = [{**tc, "index": i} for i, tc in enumerate(c["message"]["tool_calls"])]
+        choices = [{"index": 0, "delta": delta, "finish_reason": c["finish_reason"], "logprobs": None}]
+    return {"id": out["id"], "object": "chat.completion.chunk", "created": out["created"], "model": out["model"],
+            "choices": choices}
+
+
 class LLMProxy:
     def __init__(self, llm=None, model=DEFAULT_MODEL, embed=None, cache_dir=None, concurrency=DEFAULT_CONCURRENCY,
                  model_map=None):
@@ -197,6 +211,20 @@ class LLMProxy:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _send_stream(self, out, include_usage):
+                """A finished completion as server-sent events: the whole message in one chunk, then [DONE]."""
+                events = [stream_chunk(out)]
+                if include_usage:
+                    events.append({**stream_chunk(out, empty=True), "usage": out["usage"]})
+                data = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+                data = data.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def do_GET(self):
                 if self.path.rstrip("/").endswith("/models"):
                     self._send(200, {"object": "list", "data": [{"id": proxy.model, "object": "model",
@@ -210,7 +238,11 @@ class LLMProxy:
                     body = json.loads(self.rfile.read(n) or b"{}")
                     path = self.path.split("?", 1)[0].rstrip("/")
                     if path.endswith("/chat/completions"):
-                        self._send(200, proxy.chat(body))
+                        out = proxy.chat(body)
+                        if body.get("stream"):
+                            self._send_stream(out, (body.get("stream_options") or {}).get("include_usage"))
+                        else:
+                            self._send(200, out)
                     elif path.endswith("/embeddings"):
                         self._send(200, proxy.embeddings(body))
                     else:

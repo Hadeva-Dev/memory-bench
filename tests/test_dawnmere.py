@@ -1,6 +1,7 @@
 """harness/adapters/dawnmere.py: model routing without the engine; end to end on the mini fixture (slow: it downloads
 the released engine and its models, then runs them with a fake model)."""
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -105,5 +106,51 @@ def test_end_to_end_on_the_mini_fixture(tmp_path):
         assert a.guard() == {"refused": []}
         assert a.llm.calls and all(m == llm.DEFAULT_ANSWERER for m, *_ in a.llm.calls)
         assert json.loads((store.parent / "dawnmere-engine.json").read_text())["engine_version"]
+    finally:
+        a._stop()
+
+
+class EqualAccessLLM(SchemaLLM):
+    """The smallest answers, except: the brain step remembers one fact, the text intake saves one fact per contact."""
+
+    def complete(self, model, system, prompt, schema=None, nonce=""):
+        self.calls.append((model, system, prompt, schema))
+        props = (schema or {}).get("properties") or {}
+        if "calls" in props:
+            return {"calls": [{"turn": 1, "tool": "remember", "kind": "user", "project": None,
+                               "content": "Benchmark brain note: the user likes oat milk cortados."}]}
+        if "facts" in props and "title" not in props:
+            names = sorted(set(re.findall(r"saved contact: ([^:\]]+):", prompt)))
+            return {"facts": [{"name": n, "fact": f"{n} is coming to dinner on 2026-03-20."} for n in names]}
+        return fill(schema or {})
+
+
+def test_equal_access_mode_is_opt_in_and_named(monkeypatch):
+    monkeypatch.setenv("DAWNMERE_BENCH_ACCESS", "equal")
+    assert dawnmere.Dawnmere().name == "dawnmere-equal-access"
+    monkeypatch.setenv("DAWNMERE_BENCH_ACCESS", "everything")
+    with pytest.raises(AdapterError):
+        dawnmere.Dawnmere()
+
+
+@pytest.mark.slow
+def test_equal_access_end_to_end_on_the_mini_fixture(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAWNMERE_BENCH_ACCESS", "equal")
+    ds = data.load(FIX)
+    a = dawnmere.Dawnmere()
+    a.llm = EqualAccessLLM()
+    store = tmp_path / "work" / "store"
+    store.mkdir(parents=True)
+    a.reset(store)
+    try:
+        for s in ds.sessions:
+            a.set_clock(data.ts(s["end_ts"]).timestamp())
+            a.ingest(session_view(s, ds.device_names))
+        a.maintain()
+        assert a.jobs.get("brain", 0) >= 1                       # the assistant's own memory calls were asked for
+        r = a.context("do I like cortados?", "typed", "probe-1")
+        assert "oat milk cortado" in r.text                     # and its remember reached the engine
+        assert a.guard() == {"refused": []}
+        assert json.loads((store.parent / "dawnmere-engine.json").read_text())["access"] == "equal"
     finally:
         a._stop()

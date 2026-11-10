@@ -1,0 +1,16 @@
+{
+ "release": "v0.1.7",
+ "engine_version": "0.1.5",
+ "wheel": "lflabs_memory_engine-0.1.5-py3-none-any.whl",
+ "wheel_sha256": "cf5c3e1d4acb7756d877719ef83d2fb6c0f13491eb7418b4f6da180cd511d686",
+ "python": "./results/.cache/dawnmere/engine-0.1.5-cf5c3e1d4acb/bin/python",
+ "models": "./results/.cache/dawnmere/models/models-2026-10-28",
+ "models_release": "models-2026-10-28",
+ "models_policy": "equal",
+ "settings": {
+  "backend": "claude-cli",
+  "main_model": "haiku",
+  "cheap_model": "haiku",
+  "daily_calls": 200
+ }
+}

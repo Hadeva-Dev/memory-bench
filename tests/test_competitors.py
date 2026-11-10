@@ -1,8 +1,10 @@
-"""tools/llm_proxy.py and the competitor adapters (harness/adapters/mem0.py, zep_graphiti.py), with fake models.
+"""tools/llm_proxy.py and the competitor adapters (harness/adapters/mem0.py, zep_graphiti.py, claude_mem.py), with
+fake models.
 
 The proxy is tested through the real OpenAI Python client, with harness/llm.py's subprocess call replaced by a fake
 `claude` runner. The adapters run end to end through harness.run on tests/fixtures/mini with a fake model behind
-the proxy. They need the optional dependencies (`uv sync --extra competitors`) and are skipped without them.
+the proxy. They need the optional dependencies (`uv sync --extra competitors`) and are skipped without them;
+claude_mem needs its isolated install (harness/adapters/claude_mem.py) and is skipped without it.
 """
 import base64
 import hashlib
@@ -148,6 +150,15 @@ def test_chat_tool_calls(proxy_with):
     assert branches[0]["properties"]["arguments"]["required"] == ["data"]
     assert branches[-1]["properties"]["tool"] == {"const": "none"}  # tool_choice auto: may decline
     assert "add_memory" in fc.calls[0]["system"]
+
+
+def test_chat_stream_is_one_chunk_then_done(proxy_with):
+    p, client, fc = proxy_with(lambda s, pr, sc: "streamed reply")
+    chunks = list(client.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}], stream=True,
+                                                 stream_options={"include_usage": True}))
+    assert "".join(c.choices[0].delta.content or "" for c in chunks if c.choices) == "streamed reply"
+    assert chunks[0].choices[0].finish_reason == "stop" and chunks[-1].usage.total_tokens > 0
+    assert len(fc.calls) == 1
 
 
 def test_embeddings_float_and_base64(proxy_with):
@@ -387,6 +398,57 @@ def test_zep_graphiti_unit_episode_times_and_snapshot(tmp_path):
     assert "<ENTITIES>\n\n</ENTITIES>" in context_block([], [])
     rec = json.loads(fact_json(data.seed_view(ds.facts["f0001"])))
     assert rec["subject"] == "user" and rec["predicate"] == "usual coffee order" and rec["value"] == "oat milk cortado"
+
+
+def need_claude_mem():
+    from harness.adapters import claude_mem
+    if not (claude_mem.HOME / ".local" / "bin" / "claude-mem").exists():
+        pytest.skip("claude-mem is not installed under results/.cache/claude-mem/home")
+
+
+def claude_mem_model(model, system, prompt, schema):
+    """claude-mem's observer: a summary for a summary request, an observation naming the tool output otherwise."""
+    last = prompt.rsplit("User:", 1)[-1]
+    if "PROGRESS SUMMARY" in last:
+        said = re.findall(r"Claude's Full Response to User:\n(.*)", last)
+        return (f"<summary><request>Talked: {said[0][:60] if said else ''}</request><investigated></investigated>"
+                "<learned>Learned it.</learned><completed></completed><next_steps></next_steps><notes></notes>"
+                "</summary>")
+    out = re.findall(r"<outcome>(.*?)</outcome>", last, re.S)
+    title = re.sub(r"[^A-Za-z0-9 ]", " ", out[-1])[:80].strip() if out else "Tool output"
+    return (f"<observation><type>discovery</type><title>{title}</title><subtitle></subtitle><facts></facts>"
+            "<narrative>Seen.</narrative><concepts><concept>how-it-works</concept></concepts><files_read></files_read>"
+            "<files_modified></files_modified></observation>")
+
+
+def test_claude_mem_turn_events():
+    from harness.adapters.claude_mem import turn_events
+    t = lambda sp, text, name=None: {"ts": "2026-03-01T10:00:00-08:00", "speaker": sp, "text": text,
+                                     "speaker_name": name or sp}
+    typed = {"channel": "voice", "turns": [t("principal", "a"), t("principal", "b"), t("bystander", "c", "Someone nearby"),
+                                           t("assistant", "d"), t("assistant", "e"), t("principal", "f")]}
+    assert [e[:2] for e in turn_events(typed)] == [("prompt", "a\nb\nSomeone nearby: c"), ("reply", "d\n\ne"),
+                                                    ("prompt", "f")]
+    text = {"channel": "inbound_text", "turns": [t("p001", "hi", "Sam"), t("principal", "yo", "Joana Reis")]}
+    assert [e[:2] for e in turn_events(text)] == [("tool", "Sam: hi\nJoana Reis: yo")]
+    web = {"channel": "web", "turns": [t("principal", "read this"), t("web", "page", "site.example"),
+                                       t("assistant", "done")]}
+    assert [e[0] for e in turn_events(web)] == ["prompt", "tool", "reply"]
+
+
+def test_claude_mem_end_to_end(run_adapter):
+    need_claude_mem()
+    code, recs, summary, proxies = run_adapter("claude_mem", claude_mem_model, "--levels", "L2,L3")
+    assert code == 0 and recs
+    assert not [r["error"] for r in recs.values() if r["error"]]
+    texts = [r["context"]["text"] for r in recs.values()]
+    assert any("Talked:" in x for x in texts)  # session summaries reach the SessionStart block
+    for r in recs.values():
+        ids = r["context"]["item_ids"]
+        assert all(re.fullmatch(r"S?\d+", i) for i in ids)
+        assert len(ids) == len(set(ids))
+    # one summary call per assistant turn, one observation call per tool event: 4 replies + 1 email in each replay
+    assert summary["cost"]["system_total"]["model_calls"] >= 5
 
 
 def test_competitors_are_loadable_by_name():
