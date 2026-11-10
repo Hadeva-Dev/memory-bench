@@ -39,7 +39,7 @@ from harness.adapter import Adapter, AdapterError, ContextResult
 from harness.data import REPO
 from harness.prompts import _ISOLATION
 
-RELEASES = "https://github.com/Hadeva-Dev/dawnmere/releases"
+RELEASES = "https://github.com/LF-Labs-Inc/dawnmere/releases"
 CACHE = REPO / "results" / ".cache" / "dawnmere"
 BRIDGE = Path(__file__).resolve().parent / "_dawnmere_bridge.py"
 WHEEL_RE = re.compile(r"lflabs_memory_engine-(\d+\.\d+\.\d+[\w.]*)-py3-none-any\.whl")

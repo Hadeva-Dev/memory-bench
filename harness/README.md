@@ -195,7 +195,7 @@ each, a joined table on the cases all runs share, and each system's recall at an
 |---|---|
 | `mem0` | Mem0 open source (`mem0ai`), Qdrant local, additive LLM extraction per session, top 20 by hybrid search |
 | `zep_graphiti` | Graphiti (`graphiti-core`, Zep's open-source engine) on embedded Kuzu, one episode per session, facts and entities from hybrid search |
-| `dawnmere` | Dawnmere's released engine (`lflabs-memory-engine`, from a GitHub release of Hadeva-Dev/dawnmere), each session as a Claude Code session through its hooks and its daemon's worker loop |
+| `dawnmere` | Dawnmere's released engine (`lflabs-memory-engine`, from a GitHub release of LF-Labs-Inc/dawnmere), each session as a Claude Code session through its hooks and its daemon's worker loop |
 
 `mem0` and `zep_graphiti` need the optional dependencies (`uv sync --extra competitors`) and run on the benchmark's
 brains: their LLM calls go through `tools/llm_proxy.py`, a local OpenAI-compatible server that turns each request into

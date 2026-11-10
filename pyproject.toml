@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Hadeva-Dev/memory-bench"
+Repository = "https://github.com/LF-Labs-Inc/memory-bench"
 
 [project.optional-dependencies]
 competitors = [

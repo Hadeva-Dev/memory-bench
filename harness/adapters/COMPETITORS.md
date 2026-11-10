@@ -311,7 +311,7 @@ DAWNMERE_RELEASE=v0.1.6 DAWNMERE_ENGINE_VERSION=0.1.4 uv run python -m harness.r
 
 Install and provenance:
 
-- The engine wheel comes from a GitHub release of `Hadeva-Dev/dawnmere` (the latest unless `DAWNMERE_RELEASE` names
+- The engine wheel comes from a GitHub release of `LF-Labs-Inc/dawnmere` (the latest unless `DAWNMERE_RELEASE` names
   one; `DAWNMERE_ENGINE_VERSION` refuses any other engine version), checked against the release's `SHA256SUMS`, and is
   installed with uv into its own environment, `results/.cache/dawnmere/engine-<version>-<sha>/` (Python 3.12, uv's
   own). Its dependencies come from PyPI as the wheel pins them. `DAWNMERE_WHEEL=/path/to/wheel` installs a local wheel
